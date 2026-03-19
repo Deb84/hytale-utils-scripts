@@ -1,3 +1,5 @@
+Add-Type -AssemblyName System.Windows.Forms
+
 $BASE_LATEST_DIR = "$env:APPDATA\Hytale\install\release\package\game\latest"
 $BASE_ASSETS_PATH = $BASE_LATEST_DIR + "\Assets.zip"
 $BASE_SERVER_PATH = $BASE_LATEST_DIR + "\Server\HytaleServer.jar"
