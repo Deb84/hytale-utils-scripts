@@ -153,6 +153,4 @@ foreach ($k in ($START_PATH_OBJECT).Keys) {
     $CONTENT_START_DEV = $CONTENT_START_DEV -replace $k, $START_PATH_OBJECT[$k]
 }
 
-Write-Host $CONTENT_START_DEV
-
 Set-Content $FILE_START_DEV $CONTENT_START_DEV
