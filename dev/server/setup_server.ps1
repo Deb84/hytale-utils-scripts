@@ -30,14 +30,11 @@ function Throw-IfIncorrectPath($path, $msg) {
 }
 
 function IsCorrect-Path($path) {
-    Write-Host $path.GetType().FullName
     if (Is-NullString $path) {
-        Write-Host "string null"
         return $false
     }
 
     if (-Not (Test-Path $path)) {
-        Write-Host "test path"
         return $false
     }
     return $true
@@ -148,13 +145,17 @@ function Select-Path() {
             if (-not (IsCorrect-Path $pathObj.result)) {
                 Show-IncorrectPath $form "10,185"
                 continue
+            } else {
+                $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
             }
         }
-
-        $form.Close()
     }
 
-    [void]$form.ShowDialog()
+    $dialog = $form.ShowDialog()
+    if ($dialog -ne [System.Windows.Forms.DialogResult]::OK) {
+        $form.Close()
+        exit 
+    } 
 
     
     $results = @{}
@@ -162,8 +163,6 @@ function Select-Path() {
     foreach ($pathObj in $REQUIRED_SELECT_PATHS) {
         $results.Add($pathObj.name, $pathObj.result)
     }
-
-    Write-Host $results
 
     return $results
 }
