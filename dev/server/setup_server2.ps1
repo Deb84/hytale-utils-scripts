@@ -7,8 +7,9 @@ $TempFolder = "$Temp\hydl"
 $DownloaderFolder = "$TempFolder\Downloader"
 $TmpServerFolder = "$TempFolder\Server"
 
-$DownloaderName = "hytale-downloader-windows-amd64.exe"
-$ServerArchiveName = "Server.zip"
+$DownloaderFile = "$DownloaderFolder\hytale-downloader-windows-amd64.exe"
+$ServerArchiveFile = "$TmpServerFolder\Server.zip"
+$StartServerFile = "$TmpServerFolder\start.bat"
 
 $DownloaderOutputFile = "$TempFolder\hydl-out.tmp"
 $DownloaderErrorFile = "$TempFolder\hydl-err.tmp"
@@ -22,7 +23,7 @@ $RequiredSelectPaths = @(
             "Callback" = $null
             "CallbackName" = "Folder"
             "TbPos" = "10,50"
-            "BtnPos" = "220, 50"
+            "BtnPos" = "320, 50"
             "Text" = "Your server directory"
             "Name" = "server"
             "Result" = $null
@@ -31,9 +32,10 @@ $RequiredSelectPaths = @(
             "Callback" = $null
             "CallbackName" = "Folder"
             "TbPos" = "10,100"
-            "BtnPos" = "220, 100"
-            "Text" = "Your mods directory"
+            "BtnPos" = "320, 100"
+            "Text" = "Your mods directory (optional)"
             "Name" = "mods"
+            "Optional" = $true
             "Result" = $null
         }
         @{
@@ -41,8 +43,8 @@ $RequiredSelectPaths = @(
             "CallbackName" = "File"
             "Ext" = "*.exe|*.exe"
             "TbPos" = "10,150"
-            "BtnPos" = "220, 150"
-            "Text" = "Your java binary (Adoptium is recommended)"
+            "BtnPos" = "320, 150"
+            "Text" = "Your java binary (Adoptium is recommended) (optional)"
             "Name" = "java"
             "Optional" = $true
             "Result" = $null
@@ -121,7 +123,7 @@ function Select-Path {
         $textBox.Name = $PathObj.name
         $textBox.Text = $PathObj.text
         $textBox.Location = $PathObj.tbPos
-        $textBox.Width = 200
+        $textBox.Width = 300
         $Form.Controls.Add($textBox)
 
         $clk = {
@@ -178,14 +180,15 @@ function Select-Path {
     }
 
     New-Btn $form "OK" "400,185" {
+        $pathsAreValids = $true
         foreach ($pathObj in $RequiredSelectPaths) {
-            if (-not (Test-CorrectPath -Path $pathObj.result) -and $pathObj.Optional) {
+            if (-not (Test-CorrectPath -Path $pathObj.result) -and (-not $pathObj.Optional)) {
+                $pathsAreValids = $false
                 Show-IncorrectPath -Form $form -Pos "10,185"
-                continue
-            } else {
-                $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
             }
         }
+
+        if ($pathsAreValids) { $form.DialogResult = [System.Windows.Forms.DialogResult]::OK }
     }
 
     if ($form.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
@@ -196,8 +199,10 @@ function Select-Path {
     $results = @{}
 
     foreach ($pathObj in $RequiredSelectPaths) {
-        $results.Add($pathObj.name, $pathObj.result)
+        $results.Add($pathObj.Name, $pathObj.Result)
     }
+
+    Write-Host $results.java
 
     return $results
 }
@@ -257,7 +262,7 @@ function Enter-DownloaderAuth {
     }
 }
 
-$procName = Get-FileName -Uri $DownloaderName -Ext $false
+$procName = Get-FileName -Uri $DownloaderFile -Ext $false
 $proc = Get-Process -Name $procName -ErrorAction SilentlyContinue
 if ($proc) { $proc | Stop-Process -Force}
 
@@ -266,13 +271,13 @@ Remove-File $TempFolder
 New-Dir $TmpServerFolder
 New-Dir $DownloaderFolder
 
-# Select-Path $RequiredSelectPaths
+$paths = Select-Path $RequiredSelectPaths
 
 $pathHytaleDownloader = Get-File -Url $UrlHytaleDownloader -Dir "$DownloaderFolder"
 
 New-Extraction -Path $pathHytaleDownloader -Dir $DownloaderFolder
 
-$versionProc = Start-Process "$DownloaderFolder\$DownloaderName" `
+$versionProc = Start-Process $DownloaderFile `
     -ArgumentList "-print-version" `
     -PassThru `
     -RedirectStandardOutput $LatestGameVersionFile `
@@ -284,8 +289,8 @@ do {
 
 $versionProc.WaitForExit()
 
-$downloader = Start-Process "$DownloaderFolder\$DownloaderName" `
-    -ArgumentList "-download-path $TmpServerFolder\$ServerArchiveName" `
+$downloader = Start-Process $DownloaderFile `
+    -ArgumentList "-download-path $ServerArchiveFile" `
     -RedirectStandardOutput $DownloaderOutputFile `
     -RedirectStandardError $DownloaderErrorFile `
     -PassThru `
@@ -318,7 +323,28 @@ do {
 
 $downloader.WaitForExit()
 
-New-Extraction -Path "$TmpServerFolder\$ServerArchiveName" -Dir $TmpServerFolder
+New-Extraction -Path $ServerArchiveFile -Dir $TmpServerFolder
 
 
+# patch start.bat
+$startContent = Get-Content -Path $StartServerFile
+$startLine = ($startContent | Select-String "java")
 
+$modsPath = $paths.mods
+$javaPath = $paths.java
+
+Write-Host $startLine
+Write-Host $startLine.Line
+Write-Host $startLine.LineNumber
+
+if (-not (Test-NullString $modsPath) -and (Test-CorrectPath $modsPath)) {
+    $startLine.Line = $startLine.Line + " --mods $modsPath"
+}
+
+if (-not (Test-NullString $javaPath) -and (Test-CorrectPath $javaPath)) {
+    $startLine.Line = $startLine.Line -replace "java", $javaPath
+}
+
+$startContent[$startLine.LineNumber] = $startLine.Line
+
+Set-Content $StartServerFile $startContent
