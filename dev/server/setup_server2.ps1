@@ -299,6 +299,7 @@ $downloader = Start-Process $DownloaderFile `
 do {
     $output = Get-Content $DownloaderOutputFile
     $errors = Get-Content $DownloaderErrorFile -Raw | Where-Object { -not (Test-NullString $_) }
+    Start-Sleep 0.5
 }
 while ((Test-NullString $output) -and (Test-NullString $errors))
 
@@ -319,6 +320,7 @@ do {
 
     $success = $currentLine -match $DownloaderSuccessMatch
     $lastLine = $currentLine
+    Start-Sleep 0.2
 } while (-not $success)
 
 $downloader.WaitForExit()
@@ -333,10 +335,6 @@ $startLine = ($startContent | Select-String "java")
 $modsPath = $paths.mods
 $javaPath = $paths.java
 
-Write-Host $startLine
-Write-Host $startLine.Line
-Write-Host $startLine.LineNumber
-
 if (-not (Test-NullString $modsPath) -and (Test-CorrectPath $modsPath)) {
     $startLine.Line = $startLine.Line + " --mods $modsPath"
 }
@@ -345,6 +343,6 @@ if (-not (Test-NullString $javaPath) -and (Test-CorrectPath $javaPath)) {
     $startLine.Line = $startLine.Line -replace "java", $javaPath
 }
 
-$startContent[$startLine.LineNumber] = $startLine.Line
+$startContent[$startLine.LineNumber - 1] = $startLine.Line
 
 Set-Content $StartServerFile $startContent
