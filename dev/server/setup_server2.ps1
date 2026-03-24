@@ -7,9 +7,13 @@ $TempFolder = "$Temp\hydl"
 $DownloaderFolder = "$TempFolder\Downloader"
 $TmpServerFolder = "$TempFolder\Server"
 
+$StartServerFile = "start.bat"
+
 $DownloaderFile = "$DownloaderFolder\hytale-downloader-windows-amd64.exe"
 $ServerArchiveFile = "$TmpServerFolder\Server.zip"
-$StartServerFile = "$TmpServerFolder\start.bat"
+$StartServerFileTmp = "$TmpServerFolder\$StartServerFile"
+
+$CredentialsFile = "$TempFolder\.hytale-downloader-credentials.json"
 
 $DownloaderOutputFile = "$TempFolder\hydl-out.tmp"
 $DownloaderErrorFile = "$TempFolder\hydl-err.tmp"
@@ -19,42 +23,43 @@ $DownloaderSuccessMatch = "successfully downloaded"
 $DownloaderUrlNoLine = 1
 
 $RequiredSelectPaths = @(
-        @{
-            "Callback" = $null
-            "CallbackName" = "Folder"
-            "TbPos" = "10,50"
-            "BtnPos" = "320, 50"
-            "Text" = "Your server directory"
-            "Name" = "server"
-            "Result" = $null
-        }
-        @{
-            "Callback" = $null
-            "CallbackName" = "Folder"
-            "TbPos" = "10,100"
-            "BtnPos" = "320, 100"
-            "Text" = "Your mods directory (optional)"
-            "Name" = "mods"
-            "Optional" = $true
-            "Result" = $null
-        }
-        @{
-            "Callback" = $null
-            "CallbackName" = "File"
-            "Ext" = "*.exe|*.exe"
-            "TbPos" = "10,150"
-            "BtnPos" = "320, 150"
-            "Text" = "Your java binary (Adoptium is recommended) (optional)"
-            "Name" = "java"
-            "Optional" = $true
-            "Result" = $null
-        }
-    )
+    @{
+        "Callback" = $null
+        "CallbackName" = "Folder"
+        "TbPos" = "10,50"
+        "BtnPos" = "320, 50"
+        "Text" = "Your server directory"
+        "Name" = "server"
+        "Result" = $null
+    }
+    @{
+        "Callback" = $null
+        "CallbackName" = "Folder"
+        "TbPos" = "10,100"
+        "BtnPos" = "320, 100"
+        "Text" = "Your mods directory (optional)"
+        "Name" = "mods"
+        "Optional" = $true
+        "Result" = $null
+    }
+    @{
+        "Callback" = $null
+        "CallbackName" = "File"
+        "Ext" = "*.exe|*.exe"
+        "TbPos" = "10,150"
+        "BtnPos" = "320, 150"
+        "Text" = "Your java binary (Adoptium is recommended) (optional)"
+        "Name" = "java"
+        "Optional" = $true
+        "Result" = $null
+    }
+)
+
 
 # utils functions
 function Exit-Error {
     param([Exception]$Err, $Msg = "An error occured")
-    Write-Error $Msg
+    Write-Warning $Msg
     throw $Err.Message
 }
 
@@ -256,7 +261,7 @@ function New-Extraction {
 
 # buisness fonction
 function Enter-DownloaderAuth {
-    param($DownloaderAuthUrl, $DownloaderUrlNoLine)
+    param($DownloaderAuthUrl)
     if ([Uri]::IsWellFormedUriString($DownloaderAuthUrl, [UriKind]::Absolute)) {
         Start-Process $DownloaderAuthUrl
     }
@@ -266,10 +271,17 @@ $procName = Get-FileName -Uri $DownloaderFile -Ext $false
 $proc = Get-Process -Name $procName -ErrorAction SilentlyContinue
 if ($proc) { $proc | Stop-Process -Force}
 
-Remove-File $TempFolder
+# To remove
+Set-Location "C:/"
+
+if (Test-Path $TempFolder) { Remove-Item $TempFolder -Recurse -Force }
+
+Start-Sleep 1
 
 New-Dir $TmpServerFolder
 New-Dir $DownloaderFolder
+
+Set-Location $TempFolder
 
 $paths = Select-Path $RequiredSelectPaths
 
@@ -285,8 +297,10 @@ $versionProc = Start-Process $DownloaderFile `
 
 do {
     $version = Get-Content $LatestGameVersionFile
+    Start-Sleep 0.1
 } while (Test-NullString $version)
 
+if (-not $versionProc.HasExited) { $versionProc.Kill() }
 $versionProc.WaitForExit()
 
 $downloader = Start-Process $DownloaderFile `
@@ -299,7 +313,7 @@ $downloader = Start-Process $DownloaderFile `
 do {
     $output = Get-Content $DownloaderOutputFile
     $errors = Get-Content $DownloaderErrorFile -Raw | Where-Object { -not (Test-NullString $_) }
-    Start-Sleep 0.5
+    Start-Sleep 0.1
 }
 while ((Test-NullString $output) -and (Test-NullString $errors))
 
@@ -308,20 +322,28 @@ if ($errors.Count -ne 0) {
     Exit-Error "An error occured with hytale-downloader-windows-amd64.exe"
 }
 
-Enter-DownloaderAuth -DownloaderAuthUrl $output[$DownloaderUrlNoLine] -DownloaderUrlCodeLine $DownloaderUrlNoLine
+Enter-DownloaderAuth -DownloaderAuthUrl $output[$DownloaderUrlNoLine]
 
 # Display the download output in realtime
 $lastLine = $null
 do {
+    $errors = Get-Content $DownloaderErrorFile -Raw | Where-Object { -not (Test-NullString $_) }
+
     $currentLine = Get-Content $DownloaderOutputFile | Select-Object -Last 1
     if ($currentLine -eq $lastLine) { continue }
 
-    Write-Host $currentLine
+    Write-Host "`r$currentLine"
 
     $success = $currentLine -match $DownloaderSuccessMatch
     $lastLine = $currentLine
-    Start-Sleep 0.2
-} while (-not $success)
+    Start-Sleep 0.1
+} while (-not $success -and (Test-NullString $errors))
+
+if ($errors.Count -ne 0) {
+    Write-Error $errors
+    Exit-Error "An error occured with hytale-downloader-windows-amd64.exe"
+}
+
 
 $downloader.WaitForExit()
 
@@ -329,20 +351,63 @@ New-Extraction -Path $ServerArchiveFile -Dir $TmpServerFolder
 
 
 # patch start.bat
-$startContent = Get-Content -Path $StartServerFile
+$startContent = Get-Content -Path $StartServerFileTmp
 $startLine = ($startContent | Select-String "java")
 
+$serverUserPath = $paths.server
 $modsPath = $paths.mods
 $javaPath = $paths.java
 
-if (-not (Test-NullString $modsPath) -and (Test-CorrectPath $modsPath)) {
+if (Test-CorrectPath $modsPath) {
     $startLine.Line = $startLine.Line + " --mods $modsPath"
 }
 
-if (-not (Test-NullString $javaPath) -and (Test-CorrectPath $javaPath)) {
+if (Test-CorrectPath $javaPath) {
     $startLine.Line = $startLine.Line -replace "java", $javaPath
 }
 
 $startContent[$startLine.LineNumber - 1] = $startLine.Line
 
-Set-Content $StartServerFile $startContent
+Set-Content $StartServerFileTmp $startContent
+
+# Move the server files into the user server folder
+Remove-Item -Path $ServerArchiveFile
+
+Write-Host "Moving $TmpServerFolder to $serverUserPath..."
+Move-Item -Path $TmpServerFolder -Destination $serverUserPath
+
+Set-Location $serverUserPath
+
+# Clear the server temp folder
+Remove-Item "$TmpServerFolder\*" -Recurse
+
+
+#$JsonCredentials = Get-Content $CredentialsFile | ConvertFrom-Json
+
+$deviceCodeResponse = Invoke-RestMethod -Uri "https://oauth.accounts.hytale.com/oauth2/device/auth" `
+    -Method Post `
+    -Headers @{
+        "Content-Type" = "application/x-www-form-urlencoded"
+    } `
+    -Body @{
+        "client_id" = "hytale-server"
+        "scope" = "openid offline auth:server"
+    }
+
+Start-Sleep $deviceCodeResponse.interval
+
+$tokenResponse = Invoke-RestMethod -Uri "https://oauth.accounts.hytale.com/oauth2/token" `
+    -Method Post `
+    -Headers @{
+        "Content-Type" = "application/x-www-form-urlencoded"
+    } `
+    -Body @{
+        "client_id" = "hytale-server"
+        "grant_type" = "urn:ietf:params:oauth:grant-type:device_code"
+        "device_code" = $deviceCodeResponse.device_code
+    }
+
+
+
+
+# $serverProc = Start-Process "$serverUserPath\$StartServerFile"
